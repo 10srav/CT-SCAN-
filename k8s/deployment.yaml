@@ -1,0 +1,342 @@
+# Quantum CT Sinogram Denoising - Kubernetes Deployment
+# Production-ready K8s manifests
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: quantum-ct
+  labels:
+    app: quantum-ct
+
+---
+# Backend Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quantum-ct-backend
+  namespace: quantum-ct
+  labels:
+    app: quantum-ct
+    component: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: quantum-ct
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: quantum-ct
+        component: backend
+    spec:
+      containers:
+        - name: backend
+          image: quantum-ct/backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: quantum-ct-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: quantum-ct-secrets
+                  key: redis-url
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: quantum-ct-secrets
+                  key: secret-key
+            - name: NUM_QUBITS
+              value: "16"
+            - name: VQC_LAYERS
+              value: "6"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: model-storage
+              mountPath: /app/data/models
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: quantum-ct-models-pvc
+
+---
+# Backend Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: quantum-ct-backend
+  namespace: quantum-ct
+spec:
+  selector:
+    app: quantum-ct
+    component: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+
+---
+# Frontend Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quantum-ct-frontend
+  namespace: quantum-ct
+  labels:
+    app: quantum-ct
+    component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: quantum-ct
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: quantum-ct
+        component: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: quantum-ct/frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+---
+# Frontend Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: quantum-ct-frontend
+  namespace: quantum-ct
+spec:
+  selector:
+    app: quantum-ct
+    component: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+
+---
+# Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: quantum-ct-ingress
+  namespace: quantum-ct
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts:
+        - quantum-ct.example.com
+      secretName: quantum-ct-tls
+  rules:
+    - host: quantum-ct.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: quantum-ct-backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: quantum-ct-frontend
+                port:
+                  number: 80
+
+---
+# Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: quantum-ct
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: quantum-ct
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+
+---
+# Celery Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: quantum-ct
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+    spec:
+      containers:
+        - name: worker
+          image: quantum-ct/backend:latest
+          command: ["celery", "-A", "app.tasks", "worker", "--loglevel=info"]
+          env:
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: quantum-ct-secrets
+                  key: redis-url
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2000m"
+              memory: "8Gi"
+          volumeMounts:
+            - name: model-storage
+              mountPath: /app/data/models
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: quantum-ct-models-pvc
+
+---
+# Persistent Volume Claim for Models
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: quantum-ct-models-pvc
+  namespace: quantum-ct
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+# Secrets (Template - replace values in production)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: quantum-ct-secrets
+  namespace: quantum-ct
+type: Opaque
+stringData:
+  database-url: "postgresql://quantum:quantum@postgres:5432/quantum_ct"
+  redis-url: "redis://redis:6379"
+  secret-key: "your-production-secret-key-here"
+
+---
+# HorizontalPodAutoscaler for Backend
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: quantum-ct-backend-hpa
+  namespace: quantum-ct
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: quantum-ct-backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
