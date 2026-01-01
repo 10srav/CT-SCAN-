@@ -1,0 +1,46 @@
+# Prometheus Configuration for Quantum CT Monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Backend API metrics
+  - job_name: 'quantum-ct-backend'
+    static_configs:
+      - targets: ['backend:8000']
+    metrics_path: /metrics
+
+  # Celery workers
+  - job_name: 'celery-workers'
+    static_configs:
+      - targets: ['celery-worker:9102']
+
+  # Redis metrics
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+
+  # PostgreSQL metrics (with postgres_exporter)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+
+  # MinIO metrics
+  - job_name: 'minio'
+    metrics_path: /minio/v2/metrics/cluster
+    scheme: http
+    static_configs:
+      - targets: ['minio:9000']

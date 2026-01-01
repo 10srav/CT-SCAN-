@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.npm
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data & Models (large files)
+*.npy
+*.h5
+*.pt
+*.pth
+data/raw/
+data/processed/
+mlruns/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.png
+*.jpg
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+_temp_*

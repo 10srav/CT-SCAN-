@@ -1,0 +1,253 @@
+version: '3.9'
+
+# Quantum CT Sinogram Denoising - Docker Compose
+# Production-ready multi-container setup
+
+services:
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: quantum-ct-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://quantum:quantum@postgres:5432/quantum_ct
+      - REDIS_URL=redis://redis:6379
+      - MINIO_ENDPOINT=minio:9000
+      - SECRET_KEY=${SECRET_KEY:-quantum-ct-secret-change-me}
+      - NUM_QUBITS=16
+      - VQC_LAYERS=6
+    volumes:
+      - ./data:/app/data
+      - model-cache:/app/data/models
+    depends_on:
+      - postgres
+      - redis
+      - minio
+    networks:
+      - quantum-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: quantum-ct-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - quantum-network
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: quantum-ct-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=quantum
+      - POSTGRES_PASSWORD=quantum
+      - POSTGRES_DB=quantum_ct
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - quantum-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quantum -d quantum_ct"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Celery
+  redis:
+    image: redis:7-alpine
+    container_name: quantum-ct-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - quantum-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: quantum-ct-celery-worker
+    restart: unless-stopped
+    command: celery -A app.tasks worker --loglevel=info --concurrency=2
+    environment:
+      - DATABASE_URL=postgresql://quantum:quantum@postgres:5432/quantum_ct
+      - REDIS_URL=redis://redis:6379
+      - MINIO_ENDPOINT=minio:9000
+    volumes:
+      - ./data:/app/data
+      - model-cache:/app/data/models
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - quantum-network
+
+  # Celery Beat (Scheduler)
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: quantum-ct-celery-beat
+    restart: unless-stopped
+    command: celery -A app.tasks beat --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    networks:
+      - quantum-network
+
+  # Flower (Celery Monitoring)
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: quantum-ct-flower
+    restart: unless-stopped
+    command: celery -A app.tasks flower --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+      - celery-worker
+    networks:
+      - quantum-network
+
+  # MinIO Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: quantum-ct-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio-data:/data
+    networks:
+      - quantum-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MLflow Tracking Server
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.10.0
+    container_name: quantum-ct-mlflow
+    restart: unless-stopped
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://quantum:quantum@postgres:5432/mlflow
+      --default-artifact-root s3://mlflow/
+      --host 0.0.0.0
+      --port 5000
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    depends_on:
+      - postgres
+      - minio
+    networks:
+      - quantum-network
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: quantum-ct-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - quantum-network
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: quantum-ct-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=quantum
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - quantum-network
+
+  # Jupyter Lab for notebooks
+  jupyter:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.jupyter
+    container_name: quantum-ct-jupyter
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    environment:
+      - JUPYTER_TOKEN=quantum
+    volumes:
+      - ./notebooks:/home/jovyan/notebooks
+      - ./data:/home/jovyan/data
+    networks:
+      - quantum-network
+
+networks:
+  quantum-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  model-cache:
+  prometheus-data:
+  grafana-data:
