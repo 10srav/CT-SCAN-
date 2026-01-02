@@ -49,7 +49,7 @@ class AcademicReportGenerator:
     def _setup_custom_styles(self):
         """Define custom paragraph styles"""
         self.styles.add(ParagraphStyle(
-            name='Title',
+            name='ReportTitle',
             parent=self.styles['Heading1'],
             fontSize=24,
             alignment=TA_CENTER,
@@ -82,7 +82,7 @@ class AcademicReportGenerator:
         ))
 
         self.styles.add(ParagraphStyle(
-            name='BodyText',
+            name='ReportBody',
             parent=self.styles['Normal'],
             fontSize=11,
             alignment=TA_JUSTIFY,
@@ -186,7 +186,7 @@ class AcademicReportGenerator:
 
         elements.append(Paragraph(
             "QUANTUM CIRCUIT-BASED DENOISING OF<br/>CT SINOGRAMS FOR IMPROVED<br/>IMAGE RECONSTRUCTION",
-            self.styles['Title']
+            self.styles['ReportTitle']
         ))
 
         elements.append(Spacer(1, 0.5*inch))
@@ -322,7 +322,7 @@ class AcademicReportGenerator:
         projections at multiple angles, which are then mathematically reconstructed into volumetric
         images using algorithms such as Filtered Back Projection (FBP) or iterative reconstruction methods.
         """
-        elements.append(Paragraph(intro_text, self.styles['BodyText']))
+        elements.append(Paragraph(intro_text, self.styles['ReportBody']))
 
         elements.append(Paragraph("1.2 Problem Statement", self.styles['SubsectionHeader']))
 
@@ -332,7 +332,7 @@ class AcademicReportGenerator:
         electronic detector noise (Gaussian). This noise manifests prominently in the projection
         data (sinograms) and propagates through the reconstruction process, resulting in:
         """
-        elements.append(Paragraph(problem_text, self.styles['BodyText']))
+        elements.append(Paragraph(problem_text, self.styles['ReportBody']))
 
         problems = [
             "Streak artifacts in reconstructed images",
@@ -343,7 +343,7 @@ class AcademicReportGenerator:
         ]
 
         problem_list = ListFlowable(
-            [ListItem(Paragraph(p, self.styles['BodyText'])) for p in problems],
+            [ListItem(Paragraph(p, self.styles['ReportBody'])) for p in problems],
             bulletType='bullet'
         )
         elements.append(problem_list)
@@ -359,7 +359,7 @@ class AcademicReportGenerator:
         and s is the detector position. The inverse problem of reconstructing f from its projections
         is solved using the Filtered Back Projection algorithm.
         """
-        elements.append(Paragraph(math_text, self.styles['BodyText']))
+        elements.append(Paragraph(math_text, self.styles['ReportBody']))
 
         return elements
 
@@ -374,7 +374,7 @@ class AcademicReportGenerator:
         iterative reconstruction techniques, and deep learning approaches. Table 1 summarizes
         the key baseline methods and their limitations.
         """
-        elements.append(Paragraph(intro_text, self.styles['BodyText']))
+        elements.append(Paragraph(intro_text, self.styles['ReportBody']))
 
         # Literature table
         lit_data = [
@@ -427,7 +427,7 @@ class AcademicReportGenerator:
         that operates directly on sinograms, leveraging quantum computing's potential for pattern
         recognition while maintaining projection consistency.
         """
-        elements.append(Paragraph(gap_text, self.styles['BodyText']))
+        elements.append(Paragraph(gap_text, self.styles['ReportBody']))
 
         return elements
 
@@ -449,7 +449,7 @@ class AcademicReportGenerator:
         <br/>5. <b>Measurement:</b> Pauli-Z expectation values
         <br/>6. <b>Post-processing:</b> Patch reconstruction and FBP
         """
-        elements.append(Paragraph(arch_text, self.styles['BodyText']))
+        elements.append(Paragraph(arch_text, self.styles['ReportBody']))
 
         elements.append(Paragraph("4.2 Variational Quantum Circuit Design", self.styles['SubsectionHeader']))
 
@@ -462,7 +462,7 @@ class AcademicReportGenerator:
         <br/>• <b>Entanglement:</b> CZ gates in ring topology
         <br/>• <b>Measurement:</b> Computational basis with Pauli-Z expectation
         """
-        elements.append(Paragraph(vqc_text, self.styles['BodyText']))
+        elements.append(Paragraph(vqc_text, self.styles['ReportBody']))
 
         elements.append(Paragraph("4.3 Loss Function", self.styles['SubsectionHeader']))
 
@@ -474,7 +474,7 @@ class AcademicReportGenerator:
         where L_MSE is the mean squared error, L_edge is the Sobel gradient matching loss
         for edge preservation, and L_perceptual is the LPIPS perceptual similarity metric.
         """
-        elements.append(Paragraph(loss_text, self.styles['BodyText']))
+        elements.append(Paragraph(loss_text, self.styles['ReportBody']))
 
         return elements
 
@@ -496,7 +496,7 @@ class AcademicReportGenerator:
         <br/><b>DevOps:</b> Docker, Kubernetes, GitHub Actions
         <br/><b>Monitoring:</b> MLflow, Prometheus, Grafana
         """
-        elements.append(Paragraph(tech_text, self.styles['BodyText']))
+        elements.append(Paragraph(tech_text, self.styles['ReportBody']))
 
         elements.append(Paragraph("5.2 Datasets", self.styles['SubsectionHeader']))
 
@@ -510,7 +510,7 @@ class AcademicReportGenerator:
         Data preprocessing includes: Radon transform, noise simulation (Poisson + Gaussian),
         patch extraction (16×16), normalization, and 80/10/10 train/val/test split.
         """
-        elements.append(Paragraph(dataset_text, self.styles['BodyText']))
+        elements.append(Paragraph(dataset_text, self.styles['ReportBody']))
 
         return elements
 
@@ -574,7 +574,7 @@ class AcademicReportGenerator:
         <br/>• <b>Statistical Significance:</b> p < 0.001 (paired t-test)
         <br/>• <b>Processing Time:</b> Competitive at 0.45s per sinogram
         """
-        elements.append(Paragraph(findings_text, self.styles['BodyText']))
+        elements.append(Paragraph(findings_text, self.styles['ReportBody']))
 
         return elements
 
@@ -602,7 +602,7 @@ class AcademicReportGenerator:
         real quantum hardware may introduce additional noise. Training time is longer than
         classical methods due to quantum circuit evaluation overhead.
         """
-        elements.append(Paragraph(discussion_text, self.styles['BodyText']))
+        elements.append(Paragraph(discussion_text, self.styles['ReportBody']))
 
         return elements
 
@@ -630,7 +630,7 @@ class AcademicReportGenerator:
         This work contributes to SDG 3 (Good Health) by improving medical imaging quality
         and SDG 9 (Innovation) by advancing quantum computing applications in healthcare.
         """
-        elements.append(Paragraph(conclusion_text, self.styles['BodyText']))
+        elements.append(Paragraph(conclusion_text, self.styles['ReportBody']))
 
         return elements
 
@@ -667,7 +667,7 @@ class AcademicReportGenerator:
         ]
 
         for ref in references:
-            elements.append(Paragraph(ref, self.styles['BodyText']))
+            elements.append(Paragraph(ref, self.styles['ReportBody']))
 
         return elements
 
