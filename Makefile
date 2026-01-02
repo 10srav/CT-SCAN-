@@ -128,6 +128,7 @@ benchmark:
 	$(PYTHON) scripts/benchmark.py \
 		--dataset synthetic \
 		--n-samples 50 \
+		--model-path $(DATA_DIR)/models/vqc_model_best.pt \
 		--output $(RESULTS_DIR)
 	@echo "$(GREEN)Benchmark complete$(RESET)"
 
