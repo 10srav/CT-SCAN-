@@ -23,20 +23,19 @@ node_modules/
 *.swo
 
 # Data & Models (large files)
-*.npy
 *.h5
-*.pt
-*.pth
 data/raw/
 data/processed/
 mlruns/
+
+# Keep sample data and models
+!data/samples/
+!data/models/
 
 # Test artifacts
 .pytest_cache/
 .coverage
 htmlcov/
-*.png
-*.jpg
 
 # OS
 .DS_Store
