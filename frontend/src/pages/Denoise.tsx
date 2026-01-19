@@ -72,8 +72,9 @@ export const Denoise: React.FC = () => {
       formData.append('file', uploadedFile);
 
       const response = await api.post('/api/v1/denoise', formData, {
-        params: { method, patch_size: patchSize },
+        params: { method, patch_size: patchSize, return_metrics: true },
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000, // 2 minutes for VQC
       });
 
       return response.data as DenoiseResult;
