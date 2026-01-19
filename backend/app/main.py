@@ -368,21 +368,70 @@ async def denoise_sinogram(
                 detail=f"File too large. Maximum size is {settings.max_upload_size_mb}MB"
             )
 
-        # Validate and load numpy file
+        # Load file based on format
+        filename = file.filename.lower() if file.filename else ""
+        sinogram = None
+
         try:
-            sinogram = np.load(io.BytesIO(contents), allow_pickle=True)
+            if filename.endswith('.npy'):
+                # Load numpy file
+                sinogram = np.load(io.BytesIO(contents), allow_pickle=True)
+
+            elif filename.endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif')):
+                # Load image file
+                from PIL import Image
+                img = Image.open(io.BytesIO(contents))
+                # Convert to grayscale if needed
+                if img.mode != 'L':
+                    img = img.convert('L')
+                sinogram = np.array(img, dtype=np.float32)
+                # Normalize to 0-1 range
+                sinogram = sinogram / 255.0
+                logger.info("Loaded image file", filename=filename, shape=sinogram.shape)
+
+            elif filename.endswith(('.dcm', '.dicom')):
+                # Load DICOM file
+                try:
+                    import pydicom
+                    dcm = pydicom.dcmread(io.BytesIO(contents))
+                    sinogram = dcm.pixel_array.astype(np.float32)
+                    # Normalize
+                    sinogram = (sinogram - sinogram.min()) / (sinogram.max() - sinogram.min() + 1e-8)
+                    logger.info("Loaded DICOM file", filename=filename, shape=sinogram.shape)
+                except ImportError:
+                    raise HTTPException(status_code=400, detail="DICOM support requires pydicom library")
+
+            else:
+                # Try to load as numpy first, then as image
+                try:
+                    sinogram = np.load(io.BytesIO(contents), allow_pickle=True)
+                except Exception:
+                    try:
+                        from PIL import Image
+                        img = Image.open(io.BytesIO(contents))
+                        if img.mode != 'L':
+                            img = img.convert('L')
+                        sinogram = np.array(img, dtype=np.float32) / 255.0
+                    except Exception:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Unsupported file format. Please upload .npy, .png, .jpg, or .dcm files."
+                        )
+
+        except HTTPException:
+            raise
         except Exception as load_error:
-            logger.warning("Failed to load numpy file", error=str(load_error), job_id=job_id)
+            logger.warning("Failed to load file", error=str(load_error), job_id=job_id)
             raise HTTPException(
                 status_code=400,
-                detail="Invalid file format. Please upload a valid numpy (.npy) file containing sinogram data."
+                detail="Failed to load file. Please upload a valid image or numpy file."
             )
 
         # Validate sinogram shape (should be 2D)
-        if sinogram.ndim != 2:
+        if sinogram is None or sinogram.ndim != 2:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid sinogram shape. Expected 2D array, got {sinogram.ndim}D"
+                detail=f"Invalid data shape. Expected 2D array, got {sinogram.ndim if sinogram is not None else 'None'}D"
             )
 
         # Apply denoising based on method
