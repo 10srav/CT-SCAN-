@@ -191,11 +191,12 @@ async def lifespan(app: FastAPI):
     if settings.admin_password == "quantum":
         logger.warning("WARNING: Using default admin password - change this in production!")
 
-    # Initialize VQC denoiser
+    # Initialize VQC denoiser (use CPU for quantum simulation compatibility)
     config = VQCConfig(
         num_qubits=settings.num_qubits,
         num_layers=settings.vqc_layers,
-        learning_rate=settings.learning_rate
+        learning_rate=settings.learning_rate,
+        use_gpu=False  # PennyLane quantum simulation works better on CPU
     )
     app_state.denoiser = SinogramDenoiser(config)
 
