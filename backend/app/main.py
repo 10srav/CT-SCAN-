@@ -403,6 +403,14 @@ async def denoise_sinogram(
 
         processing_time = time.time() - start_time
 
+        # Compute quality metrics (comparing input vs denoised)
+        metrics = None
+        if request.return_metrics:
+            try:
+                metrics = compute_metrics(sinogram, denoised)
+            except Exception as metric_error:
+                logger.warning("Failed to compute metrics", error=str(metric_error))
+
         # Save result
         output_path = os.path.join(tempfile.gettempdir(), f"{job_id}_denoised.npy")
         np.save(output_path, denoised)
@@ -413,6 +421,7 @@ async def denoise_sinogram(
             "method": request.method,
             "output_path": output_path,
             "processing_time": processing_time,
+            "metrics": metrics,
             "created_at": datetime.utcnow().isoformat()
         }
 
@@ -420,13 +429,15 @@ async def denoise_sinogram(
             "Sinogram denoised",
             job_id=job_id,
             method=request.method,
-            processing_time=processing_time
+            processing_time=processing_time,
+            metrics=metrics
         )
 
         return DenoiseResponse(
             job_id=job_id,
             status="completed",
             message=f"Sinogram denoised using {request.method}",
+            metrics=metrics,
             processing_time=processing_time
         )
 
