@@ -55,10 +55,23 @@ class Settings(BaseSettings):
     app_version: str = "1.0.0"
     debug: bool = False
 
-    # Security
-    secret_key: str = "quantum-ct-secret-key-change-in-production"
+    # Security - MUST be set via environment variables in production
+    secret_key: str = Field(
+        default="quantum-ct-secret-key-change-in-production",
+        description="JWT secret key - MUST change in production"
+    )
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
+
+    # Admin credentials - MUST be set via environment variables in production
+    admin_username: str = Field(default="admin", description="Admin username")
+    admin_password: str = Field(default="quantum", description="Admin password - MUST change in production")
+
+    # CORS origins (comma-separated list)
+    cors_origins: str = Field(
+        default="http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173",
+        description="Allowed CORS origins (comma-separated)"
+    )
 
     # Database
     database_url: str = "sqlite:///./quantum_ct.db"
@@ -68,8 +81,8 @@ class Settings(BaseSettings):
 
     # MinIO for object storage
     minio_endpoint: str = "localhost:9000"
-    minio_access_key: str = "minioadmin"
-    minio_secret_key: str = "minioadmin"
+    minio_access_key: str = Field(default="minioadmin", description="MinIO access key")
+    minio_secret_key: str = Field(default="minioadmin", description="MinIO secret key")
 
     # Quantum configuration
     num_qubits: int = 16
@@ -80,8 +93,12 @@ class Settings(BaseSettings):
     model_dir: str = "../data/models"
     default_model: str = "vqc_model_best.pt"
 
+    # File upload limits
+    max_upload_size_mb: int = Field(default=100, description="Maximum upload file size in MB")
+
     class Config:
         env_file = ".env"
+        protected_namespaces = ('settings_',)
 
 
 settings = Settings()
@@ -168,6 +185,12 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown logic"""
     logger.info("Starting Quantum CT Denoiser API")
 
+    # Security warnings for default credentials
+    if settings.secret_key == "quantum-ct-secret-key-change-in-production":
+        logger.warning("WARNING: Using default SECRET_KEY - change this in production!")
+    if settings.admin_password == "quantum":
+        logger.warning("WARNING: Using default admin password - change this in production!")
+
     # Initialize VQC denoiser
     config = VQCConfig(
         num_qubits=settings.num_qubits,
@@ -211,10 +234,11 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS middleware
+# CORS middleware - parse origins from settings
+cors_origins = [origin.strip() for origin in settings.cors_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for production
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -226,11 +250,24 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
 
 async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Optional[User]:
-    """Get current user from token (simplified for demo)"""
-    if token:
-        # In production, validate JWT token
-        return User(username="demo_user")
-    return None
+    """Get current user from token with proper JWT validation"""
+    if not token:
+        return None
+
+    try:
+        from jose import jwt, JWTError
+
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+        return User(username=username)
+    except JWTError as e:
+        logger.warning("Invalid JWT token", error=str(e))
+        return None
+    except Exception as e:
+        logger.error("Error validating token", error=str(e))
+        return None
 
 
 # WebSocket manager
@@ -318,10 +355,34 @@ async def denoise_sinogram(
     start_time = time.time()
 
     try:
-        # Read uploaded file
+        # Read uploaded file with size validation
         import io
         contents = await file.read()
-        sinogram = np.load(io.BytesIO(contents))
+
+        # Check file size
+        max_size_bytes = settings.max_upload_size_mb * 1024 * 1024
+        if len(contents) > max_size_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {settings.max_upload_size_mb}MB"
+            )
+
+        # Validate and load numpy file
+        try:
+            sinogram = np.load(io.BytesIO(contents), allow_pickle=True)
+        except Exception as load_error:
+            logger.warning("Failed to load numpy file", error=str(load_error), job_id=job_id)
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format. Please upload a valid numpy (.npy) file containing sinogram data."
+            )
+
+        # Validate sinogram shape (should be 2D)
+        if sinogram.ndim != 2:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid sinogram shape. Expected 2D array, got {sinogram.ndim}D"
+            )
 
         # Apply denoising based on method
         if request.method == "vqc":
@@ -368,13 +429,18 @@ async def denoise_sinogram(
             processing_time=processing_time
         )
 
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
         logger.error("Denoising failed", error=str(e), job_id=job_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while processing your image. Please try again or contact support."
+        )
 
 
 @app.get("/api/v1/denoise/{job_id}/result", tags=["Denoising"])
-async def get_denoise_result(job_id: str):
+async def get_denoise_result(job_id: str, background_tasks: BackgroundTasks):
     """Download the denoised sinogram result"""
     if job_id not in app_state.jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -383,8 +449,26 @@ async def get_denoise_result(job_id: str):
     if job["status"] != "completed":
         raise HTTPException(status_code=400, detail=f"Job status: {job['status']}")
 
+    output_path = job["output_path"]
+
+    # Schedule cleanup of temp file after response is sent
+    def cleanup_temp_file(path: str, jid: str):
+        import time
+        time.sleep(5)  # Wait a bit for file to be fully sent
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                logger.info("Cleaned up temp file", path=path, job_id=jid)
+            # Also clean up job from memory
+            if jid in app_state.jobs:
+                del app_state.jobs[jid]
+        except Exception as e:
+            logger.warning("Failed to cleanup temp file", path=path, error=str(e))
+
+    background_tasks.add_task(cleanup_temp_file, output_path, job_id)
+
     return FileResponse(
-        job["output_path"],
+        output_path,
         filename=f"denoised_{job_id}.npy",
         media_type="application/octet-stream"
     )
@@ -400,8 +484,39 @@ async def reconstruct_image(
 
     Supports filters: ramp, shepp-logan, cosine, hamming, hann
     """
+    valid_filters = ["ramp", "shepp-logan", "cosine", "hamming", "hann"]
+    if filter_name not in valid_filters:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid filter. Must be one of: {', '.join(valid_filters)}"
+        )
+
     try:
-        sinogram = np.load(file.file)
+        import io
+        contents = await file.read()
+
+        # Check file size
+        max_size_bytes = settings.max_upload_size_mb * 1024 * 1024
+        if len(contents) > max_size_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {settings.max_upload_size_mb}MB"
+            )
+
+        try:
+            sinogram = np.load(io.BytesIO(contents), allow_pickle=True)
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format. Please upload a valid numpy (.npy) file."
+            )
+
+        if sinogram.ndim != 2:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid sinogram shape. Expected 2D array, got {sinogram.ndim}D"
+            )
+
         image = CTReconstructor.fbp_reconstruct(sinogram, filter_name=filter_name)
 
         job_id = str(uuid.uuid4())
@@ -414,8 +529,14 @@ async def reconstruct_image(
             "message": f"Image reconstructed using {filter_name} filter"
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Reconstruction failed", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while reconstructing the image. Please try again."
+        )
 
 
 @app.post("/api/v1/train", response_model=TrainResponse, tags=["Training"])
@@ -527,15 +648,54 @@ async def get_benchmark_metrics():
     Get benchmark metrics comparing VQC with classical methods
 
     Returns comparison of PSNR, SSIM, NRMSE for all methods.
+    Reads from actual benchmark results if available.
     """
-    # Pre-computed benchmark results (in production, compute dynamically)
+    import json
+
+    # Try to load actual benchmark results
+    benchmark_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "results", "benchmark_results.json"
+    )
+
+    if os.path.exists(benchmark_path):
+        try:
+            with open(benchmark_path, 'r') as f:
+                data = json.load(f)
+
+            aggregated = data.get("aggregated", {})
+            results = []
+
+            # Define order of methods to display
+            method_order = ["noisy", "gaussian", "median", "wiener", "tv", "vqc"]
+
+            for method in method_order:
+                if method in aggregated:
+                    m = aggregated[method]
+                    results.append(MetricsResponse(
+                        psnr=round(m.get("psnr_mean", 0), 2),
+                        ssim=round(m.get("ssim_mean", 0), 4),
+                        nrmse=round(m.get("nrmse_mean", 0), 4),
+                        processing_time=round(m.get("time_mean", 0), 4),
+                        method=method
+                    ))
+
+            if results:
+                logger.info("Loaded benchmark metrics from file", path=benchmark_path)
+                return results
+
+        except Exception as e:
+            logger.warning("Failed to load benchmark results", error=str(e), path=benchmark_path)
+
+    # Fallback to default values if file not found or error
+    logger.info("Using default benchmark metrics")
     return [
-        MetricsResponse(psnr=22.4, ssim=0.71, nrmse=0.089, processing_time=0.0, method="noisy"),
-        MetricsResponse(psnr=25.1, ssim=0.78, nrmse=0.072, processing_time=0.02, method="gaussian"),
-        MetricsResponse(psnr=26.3, ssim=0.81, nrmse=0.065, processing_time=0.03, method="wiener"),
-        MetricsResponse(psnr=28.5, ssim=0.85, nrmse=0.048, processing_time=2.10, method="tv"),
-        MetricsResponse(psnr=29.8, ssim=0.88, nrmse=0.041, processing_time=0.15, method="unet"),
-        MetricsResponse(psnr=32.1, ssim=0.93, nrmse=0.028, processing_time=0.45, method="vqc"),
+        MetricsResponse(psnr=42.2, ssim=0.962, nrmse=0.0147, processing_time=0.0001, method="noisy"),
+        MetricsResponse(psnr=33.9, ssim=0.966, nrmse=0.0382, processing_time=0.001, method="gaussian"),
+        MetricsResponse(psnr=35.4, ssim=0.971, nrmse=0.0319, processing_time=0.013, method="median"),
+        MetricsResponse(psnr=39.5, ssim=0.975, nrmse=0.0201, processing_time=0.006, method="wiener"),
+        MetricsResponse(psnr=43.7, ssim=0.975, nrmse=0.0124, processing_time=0.011, method="tv"),
+        MetricsResponse(psnr=42.7, ssim=0.963, nrmse=0.0138, processing_time=2.75, method="vqc"),
     ]
 
 
@@ -610,8 +770,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
     Returns JWT access token for API access.
     """
-    # Simplified authentication (use proper auth in production)
-    if form_data.username == "admin" and form_data.password == "quantum":
+    # Validate credentials against settings (use environment variables in production)
+    if form_data.username == settings.admin_username and form_data.password == settings.admin_password:
         from jose import jwt
 
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)

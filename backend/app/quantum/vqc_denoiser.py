@@ -146,17 +146,24 @@ class QuantumLayer(nn.Module):
         """
         batch_size = x.shape[0]
         outputs = []
+        original_device = x.device
+
+        # Move to CPU for quantum simulation (PennyLane requirement)
+        x_cpu = x.cpu()
+        params_cpu = self.params.cpu()
 
         for i in range(batch_size):
             # Normalize input to [-1, 1]
-            inp = x[i]
+            inp = x_cpu[i]
             inp = 2 * (inp - inp.min()) / (inp.max() - inp.min() + 1e-8) - 1
 
-            # Run quantum circuit
-            out = self.qnode(inp, self.params)
+            # Run quantum circuit (on CPU)
+            out = self.qnode(inp, params_cpu)
             outputs.append(torch.stack(out))
 
-        return torch.stack(outputs)
+        # Move result back to original device
+        result = torch.stack(outputs).to(original_device)
+        return result
 
 
 class ClassicalEncoder(nn.Module):
@@ -592,11 +599,25 @@ class SinogramDenoiser:
 
     def load(self, path: str):
         """Load model checkpoint"""
-        checkpoint = torch.load(path, map_location=self.device)
+        # Always load to CPU first, then move to target device
+        checkpoint = torch.load(path, map_location='cpu', weights_only=False)
         self.config = checkpoint['config']
+
+        # Recreate model with loaded config
         self.model = HybridVQCDenoiser(self.config).to(self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        # Load state dict (handle potential device mismatches)
+        state_dict = checkpoint['model_state_dict']
+        self.model.load_state_dict(state_dict)
+
+        # Reinitialize optimizer for current device
+        self.optimizer = Adam(self.model.parameters(), lr=self.config.learning_rate)
+        try:
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        except Exception:
+            # Optimizer state may not be compatible, use fresh optimizer
+            pass
+
         self.training_history = checkpoint.get('history', [])
         logger.info(f"Model loaded from {path}")
 
