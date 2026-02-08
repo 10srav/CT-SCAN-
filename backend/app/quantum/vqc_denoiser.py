@@ -144,19 +144,25 @@ class QuantumLayer(nn.Module):
         Returns:
             Output tensor [batch, n_qubits]
         """
+        original_device = x.device
         batch_size = x.shape[0]
         outputs = []
 
+        # PennyLane quantum simulator runs on CPU — move tensors there
+        x_cpu = x.detach().cpu()
+        params_cpu = self.params.detach().cpu()
+
         for i in range(batch_size):
             # Normalize input to [-1, 1]
-            inp = x[i]
+            inp = x_cpu[i]
             inp = 2 * (inp - inp.min()) / (inp.max() - inp.min() + 1e-8) - 1
 
-            # Run quantum circuit
-            out = self.qnode(inp, self.params)
+            # Run quantum circuit on CPU
+            out = self.qnode(inp, params_cpu)
             outputs.append(torch.stack(out))
 
-        return torch.stack(outputs)
+        # Move result back to original device (e.g. CUDA)
+        return torch.stack(outputs).to(original_device)
 
 
 class ClassicalEncoder(nn.Module):
@@ -562,7 +568,7 @@ class SinogramDenoiser:
         # Extract patches
         patches, shape_info = self.extract_patches(normalized, self.config.patch_size)
 
-        # Convert to tensor
+        # Convert to tensor on same device as model
         patches_tensor = torch.FloatTensor(patches).to(self.device)
 
         # Denoise
@@ -570,7 +576,7 @@ class SinogramDenoiser:
             denoised_patches = self.model(patches_tensor)
 
         # Reconstruct
-        denoised_patches = denoised_patches.cpu().numpy()
+        denoised_patches = denoised_patches.numpy()
         denoised = self.reconstruct_from_patches(
             denoised_patches, shape_info, self.config.patch_size
         )
@@ -592,7 +598,7 @@ class SinogramDenoiser:
 
     def load(self, path: str):
         """Load model checkpoint"""
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.config = checkpoint['config']
         self.model = HybridVQCDenoiser(self.config).to(self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])

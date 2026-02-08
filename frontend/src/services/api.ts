@@ -65,7 +65,8 @@ export interface JobStatus {
 }
 
 // API Configuration
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Use empty string for relative URLs so Vite's dev proxy handles /api/* routes
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 // Create axios instance
 export const api: AxiosInstance = axios.create({
@@ -93,9 +94,8 @@ api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      // Handle unauthorized
+      // Handle unauthorized — clear token but don't redirect (no login page)
       localStorage.removeItem('auth_token');
-      window.location.href = '/login';
     }
     return Promise.reject(error);
   }
@@ -238,7 +238,8 @@ export class ProgressWebSocket {
   }
 
   connect(): void {
-    const wsUrl = API_BASE_URL.replace('http', 'ws');
+    const wsBase = API_BASE_URL || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+    const wsUrl = wsBase.replace(/^http/, 'ws');
     this.ws = new WebSocket(`${wsUrl}/ws/progress/${this.jobId}`);
 
     this.ws.onopen = () => {

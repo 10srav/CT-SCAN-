@@ -54,13 +54,25 @@ export const Denoise: React.FC = () => {
   }, [toast]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: {
-      'application/octet-stream': ['.npy'],
-      'application/dicom': ['.dcm', '.dicom'],
-      'image/*': ['.png', '.jpg', '.jpeg'],
+    onDrop: (accepted, rejected) => {
+      // Validate extension manually since .npy/.dcm have no standard MIME type
+      const file = accepted[0] || rejected[0]?.file;
+      if (file) {
+        const ext = file.name.toLowerCase().split('.').pop() || '';
+        const allowed = ['npy', 'dcm', 'dicom', 'png', 'jpg', 'jpeg'];
+        if (allowed.includes(ext)) {
+          onDrop([file]);
+        } else {
+          toast({
+            title: 'Invalid file type',
+            description: `Only .npy, .dcm, .png, .jpg files are supported`,
+            variant: 'destructive',
+          });
+        }
+      }
     },
     maxFiles: 1,
+    multiple: false,
   });
 
   // Denoise mutation
