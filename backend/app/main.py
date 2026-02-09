@@ -314,14 +314,18 @@ async def root():
 @app.get("/api/v1/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
     """Health check endpoint"""
-    import torch
+    try:
+        import torch
+        gpu = torch.cuda.is_available()
+    except ImportError:
+        gpu = False
 
     return HealthResponse(
         status="healthy",
         timestamp=datetime.utcnow().isoformat(),
         version=settings.app_version,
         quantum_backend="pennylane",
-        gpu_available=torch.cuda.is_available()
+        gpu_available=gpu
     )
 
 
