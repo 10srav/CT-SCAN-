@@ -9,12 +9,12 @@ import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  LineChart, Line, ResponsiveContainer, RadarChart, PolarGrid,
+  ResponsiveContainer, RadarChart, PolarGrid,
   PolarAngleAxis, PolarRadiusAxis, Radar, Cell, Area, AreaChart,
   ReferenceLine
 } from 'recharts';
 import {
-  Activity, Zap, Image, Clock, TrendingUp, Cpu,
+  Activity, Zap, Clock, TrendingUp,
   ShieldCheck, Waves, Atom, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 

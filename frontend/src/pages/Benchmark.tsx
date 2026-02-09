@@ -5,7 +5,7 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ScatterChart, Scatter, ZAxis
 } from 'recharts';
 import { Trophy, Clock, Target, Zap } from 'lucide-react';
@@ -48,10 +48,6 @@ export const Benchmark: React.FC = () => {
   const bestClassical = metrics
     ?.filter((m) => m.method !== 'vqc' && m.method !== 'noisy')
     .sort((a, b) => b.psnr - a.psnr)[0];
-
-  const improvement = vqc && bestClassical
-    ? ((vqc.psnr - bestClassical.psnr) / bestClassical.psnr * 100).toFixed(1)
-    : '0';
 
   return (
     <div className="flex-1 space-y-6 p-8 pt-6">

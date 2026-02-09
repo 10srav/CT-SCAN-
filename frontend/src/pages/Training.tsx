@@ -10,7 +10,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Button } from '../components/ui/button';
 import { Progress } from '../components/ui/progress';
 import { Slider } from '../components/ui/slider';
-import { Switch } from '../components/ui/switch';
 import { useToast } from '../components/ui/use-toast';
 import { apiService, TrainRequest, ProgressWebSocket } from '../services/api';
 

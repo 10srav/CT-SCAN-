@@ -4,7 +4,7 @@
 
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Save, RefreshCw, Server, Cpu, Database, HardDrive } from 'lucide-react';
+import { Save, RefreshCw, Server, Cpu, HardDrive } from 'lucide-react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';

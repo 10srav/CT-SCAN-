@@ -256,7 +256,7 @@ export class ProgressWebSocket {
       }
     };
 
-    this.ws.onerror = (error) => {
+    this.ws.onerror = () => {
       this.onError(new Error('WebSocket error'));
     };
 
