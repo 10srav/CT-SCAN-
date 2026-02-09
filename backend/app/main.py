@@ -339,18 +339,63 @@ async def denoise_sinogram(
     """
     Denoise a CT sinogram using VQC or classical methods
 
-    Upload a sinogram as a numpy file (.npy) and receive the denoised result.
+    Upload a sinogram (.npy, .png, .jpg, .dcm) and receive the denoised result.
     """
     import time
+    import io
+    from PIL import Image
+
+    MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+    MAX_IMAGE_PIXELS = 25_000_000  # ~5000x5000
 
     job_id = str(uuid.uuid4())
     start_time = time.time()
 
     try:
-        # Read uploaded file
-        import io
+        # Read uploaded file with size limit
         contents = await file.read()
-        sinogram = np.load(io.BytesIO(contents))
+        if len(contents) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=400, detail="File too large (max 50 MB)")
+
+        filename = (file.filename or "").lower()
+
+        if filename.endswith(".npy"):
+            # allow_pickle=False to prevent arbitrary code execution
+            sinogram = np.load(io.BytesIO(contents), allow_pickle=False)
+        elif filename.endswith((".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")):
+            img = Image.open(io.BytesIO(contents))
+            if img.size[0] * img.size[1] > MAX_IMAGE_PIXELS:
+                raise HTTPException(status_code=400, detail="Image too large (max ~5000x5000)")
+            img = img.convert("L")  # grayscale
+            sinogram = np.array(img, dtype=np.float64) / 255.0
+        elif filename.endswith((".dcm", ".dicom")):
+            try:
+                import pydicom
+            except ImportError:
+                raise HTTPException(status_code=400, detail="DICOM support requires pydicom to be installed")
+            ds = pydicom.dcmread(io.BytesIO(contents))
+            sinogram = ds.pixel_array.astype(np.float64)
+            # Normalize to [0, 1]
+            s_min, s_max = sinogram.min(), sinogram.max()
+            if s_max - s_min > 0:
+                sinogram = (sinogram - s_min) / (s_max - s_min)
+            else:
+                sinogram = np.zeros_like(sinogram)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type. Use .npy, .png, .jpg, or .dcm"
+            )
+
+        # Ensure 2D: collapse channel axis for images, reject unexpected shapes
+        if sinogram.ndim == 3 and sinogram.shape[-1] in (1, 3, 4):
+            sinogram = sinogram.mean(axis=-1)
+        elif sinogram.ndim != 2:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Expected 2D sinogram, got {sinogram.ndim}D array with shape {sinogram.shape}"
+            )
+        sinogram = sinogram.astype(np.float64)
 
         # Apply denoising based on method
         if request.method == "vqc":
